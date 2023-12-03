@@ -1,152 +1,95 @@
 #include <iostream>
-#include <vector>
-#include <cstring>
 #include <unistd.h>
+#include <cstring>
+#include <sys/types.h>
 #include <sys/socket.h>
-#include <netinet/in.h>
+#include <netdb.h>
+#include <fcntl.h>
 #include <sys/epoll.h>
 
-struct Header {
-    uint16_t messageSize;
-    uint8_t messageType;
-    uint8_t messageSequence;
-};
+const int MAX_EVENTS = 10;
+const char PORT[] = "8080";
 
-struct LoginRequest {
-    Header header;
-    char username[32];
-    char password[32];
-};
-
-struct LoginResponse {
-    Header header;
-    uint16_t statusCode;
-};
-
-struct EchoRequest {
-    Header header;
-    uint16_t messageSize;
-    std::vector<uint8_t> cipherMessage;
-};
-
-struct EchoResponse {
-    Header header;
-    uint16_t messageSize;
-    std::vector<uint8_t> plainMessage;
-};
-
-const int PORT = 8080;
-const int MAX_EVENTS = 10; // Maximum number of events to be returned from a single epoll_wait call
+// Function prototypes
+int setup_listener_socket();
+void set_non_blocking(int socket_fd);
+void handle_new_connection(int epoll_fd, int server_fd);
+void handle_client_data(int client_fd);
 
 int main() {
-    int server_fd, new_socket;
-    struct sockaddr_in address;
-    int opt = 1;
-    int addrlen = sizeof(address);
-    char buffer[1024] = {0};
-
-    // Creating socket file descriptor
-    if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0) {
-        perror("socket failed");
-        exit(EXIT_FAILURE);
-    }
-
-    // Forcefully attaching socket to the port
-    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt))) {
-        perror("setsockopt");
-        exit(EXIT_FAILURE);
-    }
-    address.sin_family = AF_INET;
-    address.sin_addr.s_addr = INADDR_ANY;
-    address.sin_port = htons(PORT);
-
-    // Bind the socket to the address
-    if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
-        perror("bind failed");
-        exit(EXIT_FAILURE);
-    }
-    if (listen(server_fd, 3) < 0) {
-        perror("listen");
-        exit(EXIT_FAILURE);
-    }
-
-    // Create an epoll instance
+    int server_fd = setup_listener_socket();
     int epoll_fd = epoll_create1(0);
-    if (epoll_fd == -1) {
-        perror("epoll_create1");
-        exit(EXIT_FAILURE);
-    }
 
     struct epoll_event ev, events[MAX_EVENTS];
     ev.events = EPOLLIN;
     ev.data.fd = server_fd;
-
-    // Add server socket to the epoll instance
-    if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, server_fd, &ev) == -1) {
-        perror("epoll_ctl: server_fd");
-        exit(EXIT_FAILURE);
-    }
+    epoll_ctl(epoll_fd, EPOLL_CTL_ADD, server_fd, &ev);
 
     while (true) {
         int nfds = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
-        if (nfds == -1) {
-            perror("epoll_wait");
-            exit(EXIT_FAILURE);
-        }
 
         for (int n = 0; n < nfds; ++n) {
             if (events[n].data.fd == server_fd) {
-                // Accept new connection
-                new_socket = accept(server_fd, (struct sockaddr *)&address, (socklen_t*)&addrlen);
-                if (new_socket == -1) {
-                    perror("accept");
-                    exit(EXIT_FAILURE);
-                }
-
-                // Set new socket to non-blocking mode
-                int flags = fcntl(new_socket, F_GETFL, 0);
-                if (flags == -1) {
-                    perror("fcntl");
-                    exit(EXIT_FAILURE);
-                }
-                flags |= O_NONBLOCK;
-                if (fcntl(new_socket, F_SETFL, flags) == -1) {
-                    perror("fcntl");
-                    exit(EXIT_FAILURE);
-                }
-
-                // Add the new socket to the epoll instance
-                ev.events = EPOLLIN | EPOLLET;
-                ev.data.fd = new_socket;
-                if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, new_socket, &ev) == -1) {
-                    perror("epoll_ctl: new_socket");
-                    exit(EXIT_FAILURE);
-                }
-
+                handle_new_connection(epoll_fd, server_fd);
             } else {
-                // Handle data from clients
-                new_socket = events[n].data.fd;
-                int count = read(new_socket, buffer, sizeof(buffer));
-                if (count == -1) {
-                    // If errno == EAGAIN, that means we have read all data
-                    if (errno != EAGAIN) {
-                        perror("read");
-                        close(new_socket);
-                    }
-                } else if (count == 0) {
-                    // End of file. The remote has closed the connection.
-                    close(new_socket);
-                } else {
-                    // Write the buffer to standard output
-                    std::cout << "Received message: " << buffer << std::endl;
-
-                    // Echo back the message
-                    send(new_socket, buffer, count, 0);
-                }
+                handle_client_data(events[n].data.fd);
             }
         }
     }
 
     close(server_fd);
     return 0;
+}
+
+int setup_listener_socket() {
+    struct addrinfo hints, *res;
+    int listener;
+    int yes = 1; // For setsockopt SO_REUSEADDR
+
+    memset(&hints, 0, sizeof hints);
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_flags = AI_PASSIVE;
+
+    getaddrinfo(NULL, PORT, &hints, &res);
+    listener = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+
+    // Corrected setsockopt call
+    setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int));
+
+    bind(listener, res->ai_addr, res->ai_addrlen);
+    listen(listener, 10);
+    freeaddrinfo(res);
+
+    return listener;
+}
+
+void set_non_blocking(int socket_fd) {
+    int flags = fcntl(socket_fd, F_GETFL, 0);
+    fcntl(socket_fd, F_SETFL, flags | O_NONBLOCK);
+}
+
+void handle_new_connection(int epoll_fd, int server_fd) {
+    struct sockaddr_storage their_addr;
+    socklen_t addr_size = sizeof their_addr;
+    int new_fd = accept(server_fd, (struct sockaddr *)&their_addr, &addr_size);
+
+    set_non_blocking(new_fd);
+
+    struct epoll_event ev;
+    ev.events = EPOLLIN | EPOLLET;
+    ev.data.fd = new_fd;
+    epoll_ctl(epoll_fd, EPOLL_CTL_ADD, new_fd, &ev);
+}
+
+void handle_client_data(int client_fd) {
+    char buffer[1024];
+    int count = read(client_fd, buffer, sizeof(buffer));
+
+    if (count > 0) {
+        std::cout << "Received message: " << buffer << std::endl;
+        send(client_fd, buffer, count, 0);
+    } else if (count == 0 || (count == -1 && errno != EAGAIN)) {
+        close(client_fd);
+    }
 }
