@@ -10,12 +10,16 @@
 
 const char PORT[] = "8080";
 const int INITIAL_EVENT_LIST_SIZE = 10;
+const int LISTEN_MAX_CONNECTIONS = 10;
+const int BUFFER_SIZE = 1024;
+const int EPOLL_FLAGS = EPOLLIN | EPOLLET; // Edge Triggered flag
 
 // Function prototypes
 int setup_listener_socket();
 void set_non_blocking(int socket_fd);
 int handle_new_connection(int epoll_fd, int server_fd);
-void handle_client_data(int client_fd);
+void handle_client_data(int epoll_fd, int client_fd);
+void close_client_connection(int epoll_fd, int client_fd);
 
 int main() {
     int server_fd = setup_listener_socket();
@@ -58,7 +62,7 @@ int main() {
                     std::cerr << "Error handling new connection. Continuing with other connections.\n";
                 }
             } else {
-                handle_client_data(events[n].data.fd);
+                handle_client_data(epoll_fd, events[n].data.fd);
             }
         }
 
@@ -108,7 +112,7 @@ int setup_listener_socket() {
         return -1;
     }
 
-    if (listen(listener, 10) == -1) {
+    if (listen(listener, LISTEN_MAX_CONNECTIONS) == -1) {
         std::cerr << "Error listening on socket: " << strerror(errno) << "\n";
         freeaddrinfo(res);
         close(listener);
@@ -143,7 +147,7 @@ int handle_new_connection(int epoll_fd, int server_fd) {
     set_non_blocking(new_fd);
 
     struct epoll_event ev;
-    ev.events = EPOLLIN | EPOLLET;
+    ev.events = EPOLL_FLAGS;
     ev.data.fd = new_fd;
     if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, new_fd, &ev) == -1) {
         std::cerr << "Error adding new connection to epoll: " << strerror(errno) << "\n";
@@ -154,25 +158,32 @@ int handle_new_connection(int epoll_fd, int server_fd) {
     return 0;
 }
 
-void handle_client_data(int client_fd) {
-    char buffer[1024];
-    int count = read(client_fd, buffer, sizeof(buffer));
+void handle_client_data(int epoll_fd, int client_fd) {
+    char buffer[BUFFER_SIZE];
+    int count = read(client_fd, buffer, BUFFER_SIZE);
     if (count == -1) {
         if (errno != EAGAIN) {
             std::cerr << "Error reading from client: " << strerror(errno) << "\n";
+            close_client_connection(epoll_fd, client_fd);
         }
-        close(client_fd);
         return;
     } else if (count == 0) {
-        // Client closed connection
-        close(client_fd);
+        close_client_connection(epoll_fd, client_fd);
         return;
     }
 
-    std::cout << "Received message: " << buffer << std::endl;
+    std::cout << "Received message from fd " << client_fd << ": " << buffer << std::endl;
 
     if (send(client_fd, buffer, count, 0) == -1) {
         std::cerr << "Error sending data to client: " << strerror(errno) << "\n";
-        close(client_fd);
+        close_client_connection(epoll_fd, client_fd);
     }
+}
+
+void close_client_connection(int epoll_fd, int client_fd) {
+    if (epoll_ctl(epoll_fd, EPOLL_CTL_DEL, client_fd, NULL) == -1) {
+        std::cerr << "Error removing client fd from epoll: " << strerror(errno) << "\n";
+    }
+    close(client_fd);
+    std::cout << "Connection closed, fd: " << client_fd << std::endl;
 }
