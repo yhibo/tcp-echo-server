@@ -72,6 +72,7 @@ const uint8_t* deserializeLoginResponse(LoginResponse& response, const uint8_t* 
 const uint8_t* deserializeEchoRequest(EchoRequest& request, const uint8_t* buffer);
 const uint8_t* deserializeEchoResponse(EchoResponse& response, const uint8_t* buffer);
 
+std::string encryptEchoMessage(const UserCredentials &credentials, uint8_t message_sequence, const std::string& cipherText);
 
 void printHeader(const Header& header);
 void printUserCredentials(const UserCredentials& credentials);

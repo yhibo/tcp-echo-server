@@ -3,6 +3,7 @@
 #include <unordered_map>
 #include <sys/epoll.h>
 
+
 const int INITIAL_EVENT_LIST_SIZE = 10;
 const int LISTEN_MAX_CONNECTIONS = 10;
 const int INITIAL_BUFFER_SIZE = 1024;
@@ -19,6 +20,7 @@ void printLoggedUsers(const std::unordered_map<int, UserCredentials>& loggedUser
     }
 }
 
+std::string (&decryptEchoMessage)(const UserCredentials &credentials, uint8_t message_sequence, const std::string& cipherText) = encryptEchoMessage;
 int setup_listener_socket();
 void set_non_blocking(int socket_fd);
 int handle_new_connection(int epoll_fd, int server_fd);
@@ -72,7 +74,6 @@ int main() {
         }
 
         if (nfds == events.size()) {
-            // Resize the event array if full
             events.resize(events.size() * 2);
         }
     }
@@ -231,6 +232,7 @@ void handle_client_data(int epoll_fd, int client_fd) {
 
         uint16_t cipherMessageSize = ntohs(buffer[0] | (buffer[1] << 8));
 
+
         if(recv(client_fd, &buffer[0], cipherMessageSize, 0) != cipherMessageSize){
             close_client_connection(epoll_fd, client_fd);
             return;
@@ -239,7 +241,11 @@ void handle_client_data(int epoll_fd, int client_fd) {
 
         std::string cipherMessage(buffer.begin(), buffer.begin() + cipherMessageSize);
 
-        EchoResponse response = {{static_cast<uint16_t>(HEADER_BYTE_SIZE + SIZE_BYTE_SIZE + cipherMessageSize), 3, header.messageSequence}, cipherMessageSize, cipherMessage};
+        std::cout << "Cipher message: " << cipherMessage << std::endl;
+
+        std::string plainMessage = decryptEchoMessage(it->second, header.messageSequence, cipherMessage);
+
+        EchoResponse response = {{static_cast<uint16_t>(HEADER_BYTE_SIZE + SIZE_BYTE_SIZE + cipherMessageSize), 3, header.messageSequence}, cipherMessageSize, plainMessage};
 
         printEchoResponse(response);
 

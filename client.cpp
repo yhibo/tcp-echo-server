@@ -85,8 +85,8 @@ void login(int sockfd, const UserCredentials &credentials) {
     handle_login_response(sockfd);
 }
 
-void send_echo_request(int sockfd, const std::string &message) {
-    std::string cipherMessage = message;
+void send_echo_request(int sockfd, const UserCredentials &credentials, const std::string &message) {
+    std::string cipherMessage = encryptEchoMessage(credentials, MESSAGE_SEQUENCE, message);
     uint16_t totalSize = static_cast<uint16_t>(HEADER_BYTE_SIZE + SIZE_BYTE_SIZE + cipherMessage.size());
     EchoRequest request = {{totalSize, ECHO_REQUEST_TYPE, MESSAGE_SEQUENCE}, static_cast<uint16_t>(cipherMessage.size()), cipherMessage};
 
@@ -110,7 +110,11 @@ int main() {
     UserCredentials credentials = {"admin", "12345"};
     login(sockfd, credentials);
 
-    send_echo_request(sockfd, "Hello, server!");
+    send_echo_request(sockfd, credentials, "Hello, server!");
+
+    getc(stdin);
+
+    send_echo_request(sockfd, credentials, "Bye, server!");
 
     close(sockfd);
     return 0;

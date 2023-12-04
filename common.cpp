@@ -105,6 +105,34 @@ const uint8_t* deserializeEchoResponse(EchoResponse& response, const uint8_t* bu
     return advancedPtr + response.messageSize;
 }
 
+uint32_t next_key(uint32_t key) {
+return (key * 1103515245 + 12345) % 0x7FFFFFFF;
+}
+
+uint8_t calculateChecksum(const std::string& text) {
+    uint8_t checksum = 0;
+    for (char ch : text) {
+        checksum += static_cast<uint8_t>(ch);
+    }
+    return ~checksum;
+}
+
+std::string encryptEchoMessage(const UserCredentials &credentials, uint8_t message_sequence, const std::string& cipherText) {
+    uint8_t username_sum = calculateChecksum(credentials.username);
+    uint8_t password_sum = calculateChecksum(credentials.password);
+    uint32_t key = (static_cast<uint32_t>(message_sequence) << 16) | (static_cast<uint32_t>(username_sum) << 8) | password_sum;
+
+    std::string plainText;
+    plainText.reserve(cipherText.size());
+
+    for (char ch : cipherText) {
+        key = next_key(key); 
+        plainText.push_back(ch ^ static_cast<uint8_t>(key % 256));
+    }
+
+    return plainText;
+}
+
 int indentLevel = 0;
 
 void increaseIndent() {
