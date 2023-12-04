@@ -6,90 +6,173 @@
 #include <netdb.h>
 #include <fcntl.h>
 #include <sys/epoll.h>
+#include <vector>
 
-const int MAX_EVENTS = 10;
 const char PORT[] = "8080";
+const int INITIAL_EVENT_LIST_SIZE = 10;
 
 // Function prototypes
 int setup_listener_socket();
 void set_non_blocking(int socket_fd);
-void handle_new_connection(int epoll_fd, int server_fd);
+int handle_new_connection(int epoll_fd, int server_fd);
 void handle_client_data(int client_fd);
 
 int main() {
     int server_fd = setup_listener_socket();
-    int epoll_fd = epoll_create1(0);
+    if (server_fd < 0) {
+        std::cerr << "Error setting up the listener socket\n";
+        return 1;
+    }
 
-    struct epoll_event ev, events[MAX_EVENTS];
+    int epoll_fd = epoll_create1(0);
+    if (epoll_fd == -1) {
+        std::cerr << "Error creating epoll instance: " << strerror(errno) << "\n";
+        close(server_fd);
+        return 1;
+    }
+
+    struct epoll_event ev;
     ev.events = EPOLLIN;
     ev.data.fd = server_fd;
-    epoll_ctl(epoll_fd, EPOLL_CTL_ADD, server_fd, &ev);
+    if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, server_fd, &ev) == -1) {
+        std::cerr << "Error adding server socket to epoll: " << strerror(errno) << "\n";
+        close(server_fd);
+        close(epoll_fd);
+        return 1;
+    }
 
+    std::vector<struct epoll_event> events(INITIAL_EVENT_LIST_SIZE);
     while (true) {
-        int nfds = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
+        int nfds = epoll_wait(epoll_fd, events.data(), events.size(), -1);
+        if (nfds == -1) {
+            std::cerr << "Error during epoll_wait: " << strerror(errno) << "\n";
+            if (errno != EINTR) {
+                break;
+            }
+            continue;
+        }
 
         for (int n = 0; n < nfds; ++n) {
             if (events[n].data.fd == server_fd) {
-                handle_new_connection(epoll_fd, server_fd);
+                if (handle_new_connection(epoll_fd, server_fd) == -1) {
+                    std::cerr << "Error handling new connection. Continuing with other connections.\n";
+                }
             } else {
                 handle_client_data(events[n].data.fd);
             }
         }
+
+        if (nfds == events.size()) {
+            // Resize the event array if full
+            events.resize(events.size() * 2);
+        }
     }
 
     close(server_fd);
+    close(epoll_fd);
     return 0;
 }
 
 int setup_listener_socket() {
     struct addrinfo hints, *res;
-    int listener;
-    int yes = 1; // For setsockopt SO_REUSEADDR
-
     memset(&hints, 0, sizeof hints);
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_flags = AI_PASSIVE;
 
-    getaddrinfo(NULL, PORT, &hints, &res);
-    listener = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+    int rv = getaddrinfo(NULL, PORT, &hints, &res);
+    if (rv != 0) {
+        std::cerr << "getaddrinfo error: " << gai_strerror(rv) << "\n";
+        return -1;
+    }
 
-    // Corrected setsockopt call
-    setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int));
+    int listener = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+    if (listener == -1) {
+        std::cerr << "Error creating socket: " << strerror(errno) << "\n";
+        freeaddrinfo(res);
+        return -1;
+    }
 
-    bind(listener, res->ai_addr, res->ai_addrlen);
-    listen(listener, 10);
+    int yes = 1;
+    if (setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof yes) == -1) {
+        std::cerr << "Error setting socket options: " << strerror(errno) << "\n";
+        freeaddrinfo(res);
+        close(listener);
+        return -1;
+    }
+
+    if (bind(listener, res->ai_addr, res->ai_addrlen) == -1) {
+        std::cerr << "Error binding socket: " << strerror(errno) << "\n";
+        freeaddrinfo(res);
+        close(listener);
+        return -1;
+    }
+
+    if (listen(listener, 10) == -1) {
+        std::cerr << "Error listening on socket: " << strerror(errno) << "\n";
+        freeaddrinfo(res);
+        close(listener);
+        return -1;
+    }
+
     freeaddrinfo(res);
-
     return listener;
 }
 
 void set_non_blocking(int socket_fd) {
     int flags = fcntl(socket_fd, F_GETFL, 0);
-    fcntl(socket_fd, F_SETFL, flags | O_NONBLOCK);
+    if (flags == -1) {
+        std::cerr << "Error getting flags for socket: " << strerror(errno) << "\n";
+        return;
+    }
+
+    if (fcntl(socket_fd, F_SETFL, flags | O_NONBLOCK) == -1) {
+        std::cerr << "Error setting non-blocking flag for socket: " << strerror(errno) << "\n";
+    }
 }
 
-void handle_new_connection(int epoll_fd, int server_fd) {
+int handle_new_connection(int epoll_fd, int server_fd) {
     struct sockaddr_storage their_addr;
     socklen_t addr_size = sizeof their_addr;
     int new_fd = accept(server_fd, (struct sockaddr *)&their_addr, &addr_size);
+    if (new_fd == -1) {
+        std::cerr << "Error accepting new connection: " << strerror(errno) << "\n";
+        return -1;
+    }
 
     set_non_blocking(new_fd);
 
     struct epoll_event ev;
     ev.events = EPOLLIN | EPOLLET;
     ev.data.fd = new_fd;
-    epoll_ctl(epoll_fd, EPOLL_CTL_ADD, new_fd, &ev);
+    if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, new_fd, &ev) == -1) {
+        std::cerr << "Error adding new connection to epoll: " << strerror(errno) << "\n";
+        close(new_fd);
+        return -1;
+    }
+
+    return 0;
 }
 
 void handle_client_data(int client_fd) {
     char buffer[1024];
     int count = read(client_fd, buffer, sizeof(buffer));
+    if (count == -1) {
+        if (errno != EAGAIN) {
+            std::cerr << "Error reading from client: " << strerror(errno) << "\n";
+        }
+        close(client_fd);
+        return;
+    } else if (count == 0) {
+        // Client closed connection
+        close(client_fd);
+        return;
+    }
 
-    if (count > 0) {
-        std::cout << "Received message: " << buffer << std::endl;
-        send(client_fd, buffer, count, 0);
-    } else if (count == 0 || (count == -1 && errno != EAGAIN)) {
+    std::cout << "Received message: " << buffer << std::endl;
+
+    if (send(client_fd, buffer, count, 0) == -1) {
+        std::cerr << "Error sending data to client: " << strerror(errno) << "\n";
         close(client_fd);
     }
 }
