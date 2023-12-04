@@ -24,6 +24,12 @@ std::string (&decryptEchoMessage)(const UserCredentials &credentials, uint8_t me
 int setup_listener_socket();
 void set_non_blocking(int socket_fd);
 int handle_new_connection(int epoll_fd, int server_fd);
+bool receiveHeader(int client_fd, std::vector<uint8_t>& buffer, Header& header);
+bool isValidRequest(const Header& header);
+bool handleLoginRequest(int client_fd, const Header& header, std::vector<uint8_t>& buffer);
+bool handleEchoRequest(int epoll_fd, int client_fd, const Header& header, std::vector<uint8_t>& buffer);
+bool sendResponse(int client_fd, const std::vector<uint8_t>& buffer, int responseSize);
+
 void handle_client_data(int epoll_fd, int client_fd);
 void close_client_connection(int epoll_fd, int client_fd);
 uint16_t user_login(int client_fd, const UserCredentials &userCredentials);
@@ -164,103 +170,109 @@ int handle_new_connection(int epoll_fd, int server_fd) {
     return 0;
 }
 
-void handle_client_data(int epoll_fd, int client_fd) {
-
-    std::vector<uint8_t> buffer(INITIAL_BUFFER_SIZE);
-    int responseSize;
-
+bool receiveHeader(int client_fd, std::vector<uint8_t>& buffer, Header& header) {
     int count = recv(client_fd, &buffer[0], HEADER_BYTE_SIZE, 0);
-    if (count == -1) {
-        if (errno != EAGAIN) {
-            std::cout << "Error reading from client: " << strerror(errno) << "\n";
-            close_client_connection(epoll_fd, client_fd);
-        }
-        return;
+    if (count == -1 && errno != EAGAIN) {
+        std::cout << "Error reading from client: " << strerror(errno) << "\n";
+        return false;
     } else if (count != HEADER_BYTE_SIZE) {
+        return false;
+    }
+
+    deserializeHeader(header, &buffer[0]);
+    if (header.messageSize > INITIAL_BUFFER_SIZE) {
+        buffer.resize(header.messageSize);
+    }
+    return true;
+}
+
+bool isValidRequest(const Header& header) {
+    if (header.messageType != LOGIN_REQUEST_TYPE && header.messageType != ECHO_REQUEST_TYPE) {
+        std::cout << "Invalid request from client.\n";
+        return false;
+    }
+    return true;
+}
+
+bool handleLoginRequest(int client_fd, const Header& header, std::vector<uint8_t>& buffer) {
+    if (recv(client_fd, &buffer[0], USER_CREDENTIALS_BYTE_SIZE, 0) != USER_CREDENTIALS_BYTE_SIZE) {
+        return false;
+    }
+
+    UserCredentials userCredentials;
+    deserializeUserCredentials(userCredentials, &buffer[0]);
+    uint16_t statusCode = user_login(client_fd, userCredentials);
+
+    if (statusCode == 0) {
+        return false;
+    }
+
+    LoginResponse response = {{LOGIN_RESPONSE_BYTE_SIZE, LOGIN_RESPONSE_TYPE, header.messageSequence}, statusCode};
+    printLoginResponse(response);
+    serializeLoginResponse(response, &buffer[0]);
+
+    return sendResponse(client_fd, buffer, response.header.messageSize);
+}
+
+bool handleEchoRequest(int epoll_fd, int client_fd, const Header& header, std::vector<uint8_t>& buffer) {
+    auto it = loggedUsers.find(client_fd);
+    if (it == loggedUsers.end()) {
+        return false;
+    }
+
+    if (recv(client_fd, &buffer[0], SIZE_BYTE_SIZE, 0) != SIZE_BYTE_SIZE) {
+        return false;
+    }
+
+    uint16_t cipherMessageSize = ntohs(buffer[0] | (buffer[1] << 8));
+    if (recv(client_fd, &buffer[0], cipherMessageSize, 0) != cipherMessageSize) {
+        return false;
+    }
+
+    std::string cipherMessage(buffer.begin(), buffer.begin() + cipherMessageSize);
+    std::cout << "Cipher message: " << cipherMessage << std::endl;
+    std::string plainMessage = decryptEchoMessage(it->second, header.messageSequence, cipherMessage);
+
+    EchoResponse response = {{static_cast<uint16_t>(HEADER_BYTE_SIZE + SIZE_BYTE_SIZE + cipherMessageSize), ECHO_RESPONSE_TYPE, header.messageSequence}, cipherMessageSize, plainMessage};
+    printEchoResponse(response);
+
+    serializeEchoResponse(response, &buffer[0]);
+    return sendResponse(client_fd, buffer, response.header.messageSize);
+}
+
+bool sendResponse(int client_fd, const std::vector<uint8_t>& buffer, int responseSize) {
+    if (send(client_fd, &buffer[0], responseSize, 0) == -1) {
+        std::cout << "Error sending data to client: " << strerror(errno) << "\n";
+        return false;
+    }
+    return true;
+}
+
+
+void handle_client_data(int epoll_fd, int client_fd) {
+    std::vector<uint8_t> buffer(INITIAL_BUFFER_SIZE);
+    Header header;
+    if (!receiveHeader(client_fd, buffer, header)) {
         close_client_connection(epoll_fd, client_fd);
         return;
     }
 
-    Header header;
-    deserializeHeader(header, &buffer[0]);
-
-    if (header.messageSize > INITIAL_BUFFER_SIZE){
-        buffer.resize(header.messageSize);
-    }
-
-    printLoggedUsers(loggedUsers);
-
-    if (header.messageType != LOGIN_REQUEST_TYPE && header.messageType != ECHO_REQUEST_TYPE){
-        std::cout << "Invalid request from client: " << client_fd << "\n";
+    if (!isValidRequest(header)) {
         close_client_connection(epoll_fd, client_fd);
         return;
     }
 
     if (header.messageType == LOGIN_REQUEST_TYPE) {
-        if(recv(client_fd, &buffer[0], USER_CREDENTIALS_BYTE_SIZE, 0) != USER_CREDENTIALS_BYTE_SIZE){
+        if (!handleLoginRequest(client_fd, header, buffer)) {
             close_client_connection(epoll_fd, client_fd);
-            return;
         }
-
-        UserCredentials userCredentials;
-        deserializeUserCredentials(userCredentials, &buffer[0]);
-
-        uint16_t statusCode = user_login(client_fd, userCredentials);
-
-        if (statusCode == 0) {
-            close_client_connection(epoll_fd, client_fd);
-            return;
-        }
-
-        LoginResponse response = {{LOGIN_RESPONSE_BYTE_SIZE, LOGIN_RESPONSE_TYPE, header.messageSequence}, statusCode};
-
-        printLoginResponse(response);        
-        serializeLoginResponse(response, &buffer[0]);
-        responseSize = response.header.messageSize;
-
     } else {
-        auto it = loggedUsers.find(client_fd);
-        if (it == loggedUsers.end()) {
+        if (!handleEchoRequest(epoll_fd, client_fd, header, buffer)) {
             close_client_connection(epoll_fd, client_fd);
-            return;
         }
-
-        if(recv(client_fd, &buffer[0], SIZE_BYTE_SIZE, 0) != SIZE_BYTE_SIZE){
-            close_client_connection(epoll_fd, client_fd);
-            return;
-        }
-
-        uint16_t cipherMessageSize = ntohs(buffer[0] | (buffer[1] << 8));
-
-
-        if(recv(client_fd, &buffer[0], cipherMessageSize, 0) != cipherMessageSize){
-            close_client_connection(epoll_fd, client_fd);
-            return;
-        }
-
-
-        std::string cipherMessage(buffer.begin(), buffer.begin() + cipherMessageSize);
-
-        std::cout << "Cipher message: " << cipherMessage << std::endl;
-
-        std::string plainMessage = decryptEchoMessage(it->second, header.messageSequence, cipherMessage);
-
-        EchoResponse response = {{static_cast<uint16_t>(HEADER_BYTE_SIZE + SIZE_BYTE_SIZE + cipherMessageSize), 3, header.messageSequence}, cipherMessageSize, plainMessage};
-
-        printEchoResponse(response);
-
-
-        serializeEchoResponse(response, &buffer[0]);
-        responseSize = response.header.messageSize;
     }
-
-    if (send(client_fd, &buffer[0], responseSize, 0) == -1) {
-        std::cout << "Error sending data to client: " << strerror(errno) << "\n";
-        close_client_connection(epoll_fd, client_fd);
-    }
-
-    printLoggedUsers(loggedUsers);
 }
+
 
 void close_client_connection(int epoll_fd, int client_fd) {
     if (epoll_ctl(epoll_fd, EPOLL_CTL_DEL, client_fd, NULL) == -1) {
