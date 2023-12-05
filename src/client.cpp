@@ -1,15 +1,15 @@
 #include "common.hpp"
 
-const char SERVER_IP[] = "127.0.0.1";
+const char DEFAULT_SERVER_IP[] = "127.0.0.1";
 const uint16_t MESSAGE_SEQUENCE = 10;
 
-int connect_to_server() {
+int connect_to_server(const char* server_ip, const char* port) {
     struct addrinfo hints, *res;
     memset(&hints, 0, sizeof hints);
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
 
-    int status = getaddrinfo(SERVER_IP, PORT, &hints, &res);
+    int status = getaddrinfo(server_ip, port, &hints, &res);
     if (status != 0) {
         std::cerr << "getaddrinfo error: " << gai_strerror(status) << "\n";
         return -1;
@@ -99,8 +99,11 @@ void send_echo_request(int sockfd, const UserCredentials &credentials, const std
 }
 
 
-int main() {
-    int sockfd = connect_to_server();
+int main(int argc, char* argv[]) {
+    const char* server_ip = (argc > 1) ? argv[1] : DEFAULT_SERVER_IP;
+    const char* port = (argc > 2) ? argv[2] : DEFAULT_PORT;
+
+    int sockfd = connect_to_server(server_ip, port);
     if (sockfd < 0) {
         return 1;
     }

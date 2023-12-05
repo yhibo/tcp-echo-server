@@ -1,5 +1,5 @@
-# Executables
-*.out
+# Build directory
+build
 
 # VS Code
 .vscode

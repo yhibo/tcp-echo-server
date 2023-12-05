@@ -23,21 +23,23 @@ void printLogged_users(const std::unordered_map<int, UserCredentials>& logged_us
 #endif
 
 std::string (&decrypt_echo_message)(const UserCredentials &credentials, uint8_t message_sequence, const std::string& cipher_text) = encrypt_echo_message;
-int setup_listener_socket();
+int setup_listener_socket(const char* port);
 void set_non_blocking(int socket_fd);
 int handle_new_connection(int epoll_fd, int server_fd);
 bool receive_header(int client_fd, std::vector<uint8_t>& buffer, Header& header);
 bool is_valid_request(const Header& header);
 bool handle_login_request(int client_fd, const Header& header, std::vector<uint8_t>& buffer);
-bool handle_echo_request(int epoll_fd, int client_fd, const Header& header, std::vector<uint8_t>& buffer);
+bool handle_echo_request(int client_fd, const Header& header, std::vector<uint8_t>& buffer);
 bool send_response(int client_fd, const std::vector<uint8_t>& buffer, int response_size);
 
 void handle_client_data(int epoll_fd, int client_fd);
 void close_client_connection(int epoll_fd, int client_fd);
 uint16_t user_login(int client_fd, const UserCredentials &user_credentials);
 
-int main() {
-    int server_fd = setup_listener_socket();
+int main(int argc, char* argv[]) {
+    const char* port = (argc > 1) ? argv[1] : DEFAULT_PORT;
+
+    int server_fd = setup_listener_socket(port);
     if (server_fd < 0) {
         #ifndef NDEBUG
         std::cout << "Error setting up the listener socket\n";
@@ -91,7 +93,7 @@ int main() {
             }
         }
 
-        if (nfds == events.size()) {
+        if (nfds == static_cast<int>(events.size())) {
             events.resize(events.size() * 2);
         }
     }
@@ -101,14 +103,14 @@ int main() {
     return 0;
 }
 
-int setup_listener_socket() {
+int setup_listener_socket(const char* port) {
     struct addrinfo hints, *res;
     memset(&hints, 0, sizeof hints);
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_flags = AI_PASSIVE;
 
-    int rv = getaddrinfo(NULL, PORT, &hints, &res);
+    int rv = getaddrinfo(NULL, port, &hints, &res);
     if (rv != 0) {
         #ifndef NDEBUG
         std::cout << "getaddrinfo error: " << gai_strerror(rv) << "\n";
@@ -248,7 +250,7 @@ bool handle_login_request(int client_fd, const Header& header, std::vector<uint8
     return send_response(client_fd, buffer, response.header.message_size);
 }
 
-bool handle_echo_request(int epoll_fd, int client_fd, const Header& header, std::vector<uint8_t>& buffer) {
+bool handle_echo_request(int client_fd, const Header& header, std::vector<uint8_t>& buffer) {
     auto it = logged_users.find(client_fd);
     if (it == logged_users.end()) {
         return false;
@@ -305,7 +307,7 @@ void handle_client_data(int epoll_fd, int client_fd) {
             close_client_connection(epoll_fd, client_fd);
         }
     } else {
-        if (!handle_echo_request(epoll_fd, client_fd, header, buffer)) {
+        if (!handle_echo_request(client_fd, header, buffer)) {
             close_client_connection(epoll_fd, client_fd);
         }
     }

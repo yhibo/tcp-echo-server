@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-const char PORT[] = "8080";
+const char DEFAULT_PORT[] = "8080";
 
 const uint8_t LOGIN_REQUEST_TYPE = 0;
 const uint8_t LOGIN_RESPONSE_TYPE = 1;
