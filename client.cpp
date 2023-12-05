@@ -43,13 +43,11 @@ void handle_login_response(int sockfd) {
     }
 
     LoginResponse response;
-    deserializeLoginResponse(response, buffer.data());
+    deserialize_login_response(response, buffer.data());
 
-    // Print the status code of the login response
-    std::cout << "Login Response Status: " << response.statusCode << std::endl;
+    std::cout << "Login Response Status: " << response.status_code << std::endl;
 }
 
-// Function to handle echo response
 void handle_echo_response(int sockfd) {
     std::vector<uint8_t> buffer(HEADER_BYTE_SIZE);
     if (recv(sockfd, buffer.data(), HEADER_BYTE_SIZE, 0) != HEADER_BYTE_SIZE) {
@@ -58,27 +56,27 @@ void handle_echo_response(int sockfd) {
     }
 
     Header header;
-    deserializeHeader(header, buffer.data());
+    deserialize_header(header, buffer.data());
 
-    buffer.resize(header.messageSize);
-    if (recv(sockfd, &buffer[HEADER_BYTE_SIZE], header.messageSize, 0) != header.messageSize - HEADER_BYTE_SIZE) {
+    buffer.resize(header.message_size);
+    if (recv(sockfd, &buffer[HEADER_BYTE_SIZE], header.message_size, 0) != header.message_size - HEADER_BYTE_SIZE) {
         std::cerr << "Error receiving echo response message: " << strerror(errno) << "\n";
         return;
     }
 
     EchoResponse response;
-    deserializeEchoResponse(response, buffer.data());
+    deserialize_echo_response(response, buffer.data());
 
-    std::cout << "Echo Response Message: " << response.plainMessage << std::endl;
+    std::cout << "Echo Response Message: " << response.plain_message << std::endl;
 }
 
 void login(int sockfd, const UserCredentials &credentials) {
     LoginRequest request = {{LOGIN_REQUEST_BYTE_SIZE, LOGIN_REQUEST_TYPE, MESSAGE_SEQUENCE}, credentials};
 
     std::vector<uint8_t> buffer(1024);
-    serializeLoginRequest(request, buffer.data());
+    serialize_login_request(request, buffer.data());
 
-    if (send(sockfd, buffer.data(), request.header.messageSize, 0) == -1) {
+    if (send(sockfd, buffer.data(), request.header.message_size, 0) == -1) {
         std::cerr << "Error sending login request: " << strerror(errno) << "\n";
     }
 
@@ -86,14 +84,14 @@ void login(int sockfd, const UserCredentials &credentials) {
 }
 
 void send_echo_request(int sockfd, const UserCredentials &credentials, const std::string &message) {
-    std::string cipherMessage = encryptEchoMessage(credentials, MESSAGE_SEQUENCE, message);
-    uint16_t totalSize = static_cast<uint16_t>(HEADER_BYTE_SIZE + SIZE_BYTE_SIZE + cipherMessage.size());
-    EchoRequest request = {{totalSize, ECHO_REQUEST_TYPE, MESSAGE_SEQUENCE}, static_cast<uint16_t>(cipherMessage.size()), cipherMessage};
+    std::string cipher_message = encrypt_echo_message(credentials, MESSAGE_SEQUENCE, message);
+    uint16_t totalSize = static_cast<uint16_t>(HEADER_BYTE_SIZE + SIZE_BYTE_SIZE + cipher_message.size());
+    EchoRequest request = {{totalSize, ECHO_REQUEST_TYPE, MESSAGE_SEQUENCE}, static_cast<uint16_t>(cipher_message.size()), cipher_message};
 
     std::vector<uint8_t> buffer(1024);
-    serializeEchoRequest(request, buffer.data());
+    serialize_echo_request(request, buffer.data());
 
-    if (send(sockfd, buffer.data(), request.header.messageSize, 0) == -1) {
+    if (send(sockfd, buffer.data(), request.header.message_size, 0) == -1) {
         std::cerr << "Error sending echo request: " << strerror(errno) << "\n";
     }
 

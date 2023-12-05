@@ -23,9 +23,9 @@ const uint16_t LOGIN_REQUEST_BYTE_SIZE = HEADER_BYTE_SIZE + USER_CREDENTIALS_BYT
 const uint16_t LOGIN_RESPONSE_BYTE_SIZE = HEADER_BYTE_SIZE + SIZE_BYTE_SIZE;
 
 struct Header {
-    uint16_t messageSize;
-    uint8_t messageType;
-    uint8_t messageSequence;
+    uint16_t message_size;
+    uint8_t message_type;
+    uint8_t message_sequence;
 };
 
 struct UserCredentials
@@ -34,7 +34,6 @@ struct UserCredentials
     char password[PASS_BYTE_SIZE];
 };
 
-
 struct LoginRequest {
     Header header;
     UserCredentials credentials;
@@ -42,41 +41,43 @@ struct LoginRequest {
 
 struct LoginResponse {
     Header header;
-    uint16_t statusCode;
+    uint16_t status_code;
 };
 
 struct EchoRequest {
     Header header;
-    uint16_t messageSize;
-    std::string cipherMessage;
+    uint16_t message_size;
+    std::string cipher_message;
 };
 
 struct EchoResponse {
     Header header;
-    uint16_t messageSize;
-    std::string plainMessage;
+    uint16_t message_size;
+    std::string plain_message;
 };
 
 
-uint8_t* serializeHeader(const Header& header, uint8_t* buffer);
-uint8_t* serializeUserCredentials(const UserCredentials& credentials, uint8_t* buffer);
-uint8_t* serializeLoginRequest(const LoginRequest& request, uint8_t* buffer);
-uint8_t* serializeLoginResponse(const LoginResponse& response, uint8_t* buffer);
-uint8_t* serializeEchoRequest(const EchoRequest& request, uint8_t* buffer);
-uint8_t* serializeEchoResponse(const EchoResponse& response, uint8_t* buffer);
+uint8_t* serialize_header(const Header& header, uint8_t* buffer);
+uint8_t* serialize_user_credentials(const UserCredentials& credentials, uint8_t* buffer);
+uint8_t* serialize_login_request(const LoginRequest& request, uint8_t* buffer);
+uint8_t* serialize_login_response(const LoginResponse& response, uint8_t* buffer);
+uint8_t* serialize_echo_request(const EchoRequest& request, uint8_t* buffer);
+uint8_t* serialize_echo_response(const EchoResponse& response, uint8_t* buffer);
 
-const uint8_t* deserializeHeader(Header& header, const uint8_t* buffer);
-const uint8_t* deserializeUserCredentials(UserCredentials& credentials, const uint8_t* buffer);
-const uint8_t* deserializeLoginRequest(LoginRequest& request, const uint8_t* buffer);
-const uint8_t* deserializeLoginResponse(LoginResponse& response, const uint8_t* buffer);
-const uint8_t* deserializeEchoRequest(EchoRequest& request, const uint8_t* buffer);
-const uint8_t* deserializeEchoResponse(EchoResponse& response, const uint8_t* buffer);
+const uint8_t* deserialize_header(Header& header, const uint8_t* buffer);
+const uint8_t* deserialize_user_credentials(UserCredentials& credentials, const uint8_t* buffer);
+const uint8_t* deserialize_login_request(LoginRequest& request, const uint8_t* buffer);
+const uint8_t* deserialize_login_response(LoginResponse& response, const uint8_t* buffer);
+const uint8_t* deserialize_echo_request(EchoRequest& request, const uint8_t* buffer);
+const uint8_t* deserialize_echo_response(EchoResponse& response, const uint8_t* buffer);
 
-std::string encryptEchoMessage(const UserCredentials &credentials, uint8_t message_sequence, const std::string& cipherText);
+std::string encrypt_echo_message(const UserCredentials &credentials, uint8_t message_sequence, const std::string& cipher_text);
 
-void printHeader(const Header& header);
-void printUserCredentials(const UserCredentials& credentials);
-void printLoginRequest(const LoginRequest& request);
-void printLoginResponse(const LoginResponse& response);
-void printEchoRequest(const EchoRequest& request);
-void printEchoResponse(const EchoResponse& response);
+#ifndef NDEBUG
+void print_header(const Header& header);
+void print_user_credentials(const UserCredentials& credentials);
+void print_login_request(const LoginRequest& request);
+void print_login_response(const LoginResponse& response);
+void print_echo_request(const EchoRequest& request);
+void print_echo_response(const EchoResponse& response);
+#endif
