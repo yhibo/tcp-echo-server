@@ -34,15 +34,8 @@ $(BUILDDIR):
 	mkdir -p $(BUILDDIR)
 
 run:
-	@bash -c '(gnome-terminal -e "./build/server 8080" & disown) || \
-	          (konsole -e "./build/server 8080" & disown) || \
-	          (xterm -e "./build/server 8080" & disown) || \
-	          echo "No known terminal emulator found." &'
-	@bash -c '(gnome-terminal -e "./build/client 127.0.0.1 8080" & disown) || \
-	          (konsole -e "./build/client 127.0.0.1 8080" & disown) || \
-	          (xterm -e "./build/client 127.0.0.1 8080" & disown) || \
-	          echo "No known terminal emulator found." &'
-	@bash -c '(gnome-terminal -e "./build/client 127.0.0.1 8080" & disown) || \
-	          (konsole -e "./build/client 127.0.0.1 8080" & disown) || \
-	          (xterm -e "./build/client 127.0.0.1 8080" & disown) || \
-	          echo "No known terminal emulator found." &'
+	@command -v tmux >/dev/null 2>&1 || { echo >&2 "tmux not installed. Aborting."; exit 1; }
+	@tmux new-session -d -s my_session './build/server 8080; read'
+	@tmux split-window -t my_session -h './build/client 127.0.0.1 8080; read'
+	@tmux split-window -t my_session -h './build/client 127.0.0.1 8080; read'
+	@tmux -2 attach-session -t my_session
