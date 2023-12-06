@@ -244,7 +244,9 @@ bool handle_login_request(int client_fd, const Header& header, std::vector<uint8
     }
 
     LoginResponse response = {{LOGIN_RESPONSE_BYTE_SIZE, LOGIN_RESPONSE_TYPE, header.message_sequence}, status_code};
+    #ifndef NDEBUG
     print_login_response(response);
+    #endif
     serialize_login_response(response, &buffer[0]);
 
     return send_response(client_fd, buffer, response.header.message_size);
@@ -272,7 +274,9 @@ bool handle_echo_request(int client_fd, const Header& header, std::vector<uint8_
     std::string plain_message = decrypt_echo_message(it->second, header.message_sequence, cipher_message);
 
     EchoResponse response = {{static_cast<uint16_t>(HEADER_BYTE_SIZE + SIZE_BYTE_SIZE + cipher_message_size), ECHO_RESPONSE_TYPE, header.message_sequence}, cipher_message_size, plain_message};
+    #ifndef NDEBUG
     print_echo_response(response);
+    #endif
 
     serialize_echo_response(response, &buffer[0]);
     return send_response(client_fd, buffer, response.header.message_size);
