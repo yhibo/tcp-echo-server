@@ -1,6 +1,6 @@
 # TCP Echo Client-Server Project
 
-This project consists of a TCP echo client and server. The provided Makefile simplifies the process of compiling and running these applications.
+This project consists of a TCP echo client and server. The server uses `epoll` for I/O multiplexing, which means it is specifically designed for Linux environments. The provided Makefile simplifies the process of compiling and running these applications.
 
 ## Directory Structure
 
@@ -33,7 +33,7 @@ make clean
 
 ### Server
 
-The server accepts one optional command-line argument for the port. If no argument is provided, the default port is `8080`.
+The server accepts one optional command-line argument for the port. If no argument is provided, the default port is `8080`. Note that the server is implemented using `epoll`, and therefore it is only compatible with Linux systems.
 
 ```bash
 # Run the server on the default or specified port
@@ -43,6 +43,13 @@ The server accepts one optional command-line argument for the port. If no argume
 ### Client
 
 The client accepts two optional command-line arguments: the server IP and port. If no arguments are passed, the default server IP is `127.0.0.1`, and the default port is `8080`.
+
+The client behavior is as follows:
+
+1. Sends a login request to the server.
+1. Sends an echo request and waits for the response.
+1. Waits for the user to press a key.
+1. Sends another echo request and waits for the response.
 
 ```bash
 # Connect the client to the specified server IP and port
